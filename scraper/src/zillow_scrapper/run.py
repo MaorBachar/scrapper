@@ -158,7 +158,7 @@ def run_scrape(
         matched_results: list[dict[str, Any]] = []
 
         total_listings = len(all_listings)
-        console.print(f"[cyan]Searching sold comps for {total_listings} listings in batches of 5...[/cyan]")
+        console.print(f"[cyan]Searching sold comps for {total_listings} listings in batches of 10...[/cyan]")
         
         # Filter out already processed listings
         listings_to_process = [
@@ -198,8 +198,8 @@ def run_scrape(
 
             return lk, chosen_payload, chosen_comps, chosen_window
         
-        # Process in batches of 5
-        batch_size = 5
+        # Process in batches of 10
+        batch_size = 10
         processed = len(all_listings) - len(listings_to_process)
         
         for batch_start in range(0, len(listings_to_process), batch_size):
@@ -210,7 +210,7 @@ def run_scrape(
             console.print(f"[cyan]Processing batch {batch_num}/{total_batches} ({len(batch)} listings)...[/cyan]")
             
             # Process batch in parallel
-            with ThreadPoolExecutor(max_workers=5) as executor:
+            with ThreadPoolExecutor(max_workers=10) as executor:
                 future_to_listing = {
                     executor.submit(process_listing, listing): listing
                     for listing in batch
