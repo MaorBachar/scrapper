@@ -24,7 +24,7 @@ export async function POST(request: Request) {
 
     // Generate run_id (format: YYYYMMDD_HHMMSS_mmm to ensure uniqueness)
     // Include milliseconds to avoid collisions when multiple requests come in the same second
-    let run_id: string;
+    let run_id: string = "";
     let runData: any;
     let runError: any;
     let attempts = 0;
@@ -76,6 +76,14 @@ export async function POST(request: Request) {
       console.error("Failed to create run:", runError);
       return NextResponse.json(
         { error: `Failed to create run: ${runError.message}` },
+        { status: 500 }
+      );
+    }
+
+    // Ensure run_id was assigned (TypeScript check)
+    if (!run_id) {
+      return NextResponse.json(
+        { error: "Failed to generate run_id" },
         { status: 500 }
       );
     }
