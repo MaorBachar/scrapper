@@ -6,8 +6,15 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from pathlib import Path
 from typing import Optional
+
+# Add src directory to Python path for Vercel deployment
+current_dir = Path(__file__).parent
+src_dir = current_dir / "src"
+if src_dir.exists() and str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
