@@ -1,0 +1,40 @@
+Metadata-Version: 2.4
+Name: zillow-scrapper
+Version: 0.1.0
+Summary: Zillow scraper for Ohio ZIPs: active for-sale listings + nearby sold comps.
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: homeharvest>=0.8.18
+Requires-Dist: pydantic>=2.6.0
+Requires-Dist: typer>=0.12.0
+Requires-Dist: python-dateutil>=2.9.0.post0
+Requires-Dist: rich>=13.7.0
+Requires-Dist: certifi>=2024.0.0
+Requires-Dist: requests>=2.31.0
+Requires-Dist: urllib3>=2.0.0
+Requires-Dist: supabase>=2.0.0
+
+## Scraper
+
+This folder contains the Python Playwright scraper and writes outputs into `scraper/data/runs/<runId>/`.
+
+### Run (once dependencies are installed)
+
+```bash
+cd scraper
+python -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+pip install .
+python -m playwright install chromium
+
+# example run
+zillow-scrapper --zips 44101,44102
+```
+
+### If Zillow blocks headless scraping (captcha / access denied)
+
+```bash
+zillow-scrapper --zips 44125 --headful --user-data-dir .pw-profile
+```
+
