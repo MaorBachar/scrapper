@@ -110,9 +110,9 @@ export async function POST(request: Request) {
       console.log(`[API] Calling Python backend at: ${backendEndpoint}`);
       
       try {
-        // Add timeout to prevent hanging requests (30 seconds)
+        // Add timeout to prevent hanging requests (300 seconds = 5 minutes)
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        const timeoutId = setTimeout(() => controller.abort(), 300000);
         
         const backendResponse = await fetch(backendEndpoint, {
           method: "POST",
