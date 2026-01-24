@@ -91,13 +91,21 @@ export async function POST(request: Request) {
     // Check if Python backend URL is configured (for production)
     // Default: use local Python process if PYTHON_BACKEND_URL is not set
     const pythonBackendUrl = process.env.PYTHON_BACKEND_URL;
+    const pythonBackendPath = process.env.PYTHON_BACKEND_PATH || "/api/scrape";
     
     if (pythonBackendUrl) {
       // Call Python backend via HTTP (production mode)
-      // If URL already includes path, use it as-is; otherwise append /api/scrape
-      const backendEndpoint = pythonBackendUrl.includes('/api/') 
-        ? pythonBackendUrl 
-        : `${pythonBackendUrl}/api/scrape`;
+      // Construct endpoint: if URL already includes path, use it as-is; otherwise append configured path
+      let backendEndpoint: string;
+      if (pythonBackendUrl.includes('/api/') || pythonBackendUrl.endsWith('/')) {
+        // URL already has a path or ends with /, use as-is
+        backendEndpoint = pythonBackendUrl.endsWith('/') 
+          ? `${pythonBackendUrl}${pythonBackendPath.replace(/^\//, '')}` 
+          : pythonBackendUrl;
+      } else {
+        // Append the configured path
+        backendEndpoint = `${pythonBackendUrl}${pythonBackendPath}`;
+      }
       
       console.log(`[API] Calling Python backend at: ${backendEndpoint}`);
       
@@ -124,7 +132,9 @@ export async function POST(request: Request) {
         if (!backendResponse.ok) {
           let errorMessage: string;
           
-          if (backendResponse.status === 405) {
+          if (backendResponse.status === 404) {
+            errorMessage = `Endpoint not found at ${backendEndpoint}. Please check PYTHON_BACKEND_URL and PYTHON_BACKEND_PATH environment variables.`;
+          } else if (backendResponse.status === 405) {
             const allowedMethods = backendResponse.headers.get('Allow');
             errorMessage = `Method Not Allowed. ${allowedMethods ? `Allowed methods: ${allowedMethods}` : 'The endpoint may not accept POST requests.'}`;
           } else if (backendResponse.status === 508) {
