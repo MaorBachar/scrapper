@@ -8,6 +8,8 @@ export default function ScrapeForm() {
   const [loading, setLoading] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<"completed" | "failed" | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,10 +47,15 @@ export default function ScrapeForm() {
 
       const data = await response.json();
       setRunId(data.run_id);
-      // Reload the page after a short delay to show the new run
-      setTimeout(() => {
-        window.location.reload();
-      }, 2000);
+      setStatus(data.status as "completed" | "failed");
+      setStatusMessage(data.message || null);
+      
+      // If completed, reload page to show results after a short delay
+      if (data.status === "completed") {
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
@@ -123,7 +130,7 @@ export default function ScrapeForm() {
             cursor: loading ? "not-allowed" : "pointer",
           }}
         >
-          {loading ? "Starting..." : "Start Scrape"}
+          {loading ? "Scraping..." : "Start Scrape"}
         </button>
       </div>
       {error && (
@@ -131,9 +138,27 @@ export default function ScrapeForm() {
           Error: {error}
         </div>
       )}
-      {runId && (
-        <div style={{ marginTop: 12, padding: 8, background: "#efe", color: "#060", borderRadius: 4, fontSize: 14 }}>
-          Scrape started! Run ID: {runId}. Page will refresh shortly...
+      {runId && status && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: 8,
+            background: status === "completed" ? "#efe" : "#fee",
+            color: status === "completed" ? "#060" : "#c00",
+            borderRadius: 4,
+            fontSize: 14,
+          }}
+        >
+          {status === "completed" ? (
+            <>
+              ✓ Scrape completed! Run ID: {runId}. {statusMessage && <div style={{ marginTop: 4, fontSize: 12 }}>{statusMessage}</div>}
+              {status === "completed" && <div style={{ marginTop: 4, fontSize: 12 }}>Page will refresh shortly...</div>}
+            </>
+          ) : (
+            <>
+              ✗ Scrape failed! Run ID: {runId}. {statusMessage && <div style={{ marginTop: 4, fontSize: 12 }}>{statusMessage}</div>}
+            </>
+          )}
         </div>
       )}
     </form>

@@ -159,11 +159,25 @@ export async function POST(request: Request) {
         const backendData = await backendResponse.json();
         console.log(`[API] Python backend response:`, backendData);
         
-        // Return immediately - backend will update status in Supabase
+        // Update Supabase with final status from Python backend
+        if (supabaseAdmin) {
+          await supabaseAdmin
+            .from("runs")
+            .update({
+              status: backendData.status,
+              completed_at: backendData.completed_at || null,
+              error_message: backendData.error_message || null,
+            })
+            .eq("run_id", run_id);
+        }
+        
+        // Return final status to frontend
         return NextResponse.json({
-          run_id,
-          status: "pending",
-          message: "Scraper started via backend",
+          run_id: backendData.run_id,
+          status: backendData.status,
+          message: backendData.message,
+          completed_at: backendData.completed_at,
+          error_message: backendData.error_message,
         });
       } catch (error: unknown) {
         let errorMessage = error instanceof Error ? error.message : String(error);
@@ -255,28 +269,13 @@ export async function POST(request: Request) {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    // Set a timeout to mark as failed if process doesn't start updating status
-    const statusTimeout = setTimeout(async () => {
-      if (!supabaseAdmin) return;
-      
-      // Check if status is still pending after 30 seconds
-      const { data: runCheck } = await supabaseAdmin
-        .from("runs")
-        .select("status")
-        .eq("run_id", run_id)
-        .single();
-      
-      if (runCheck?.status === "pending") {
-        console.error(`[API] Run ${run_id} still pending after 30s, marking as failed`);
-        await supabaseAdmin
-          .from("runs")
-          .update({
-            status: "failed",
-            error_message: "Process started but did not update status within 30 seconds. Check server logs.",
-          })
-          .eq("run_id", run_id);
+    // Set a timeout for very long-running processes (e.g., 10 minutes)
+    const processTimeout = setTimeout(() => {
+      if (!child.killed) {
+        console.error(`[API] Process timeout for run ${run_id}, killing process`);
+        child.kill();
       }
-    }, 30000);
+    }, 600000); // 10 minutes
 
     let stdout = "";
     let stderr = "";
@@ -301,70 +300,101 @@ export async function POST(request: Request) {
       }
     });
 
-    child.on("close", async (code) => {
-      clearTimeout(statusTimeout);
-      console.log(`[API] Process closed for run ${run_id} with exit code ${code}`);
-      console.log(`[API] stdout length: ${stdout.length}, stderr length: ${stderr.length}`);
-      
-      if (!supabaseAdmin) {
-        console.error(`[API] Supabase admin client not available, cannot update status for run ${run_id}`);
-        return;
-      }
-      
-      if (code === 0) {
-        // Update status to completed
-        const { error } = await supabaseAdmin
-          .from("runs")
-          .update({ status: "completed", completed_at: new Date().toISOString() })
-          .eq("run_id", run_id);
-        if (error) {
-          console.error(`[API] Failed to update status to completed: ${error.message}`);
-        } else {
-          console.log(`[API] Scraper completed successfully for run ${run_id}`);
+    // Wait for process to complete
+    return new Promise<NextResponse>((resolve) => {
+      child.on("close", async (code) => {
+        clearTimeout(processTimeout);
+        console.log(`[API] Process closed for run ${run_id} with exit code ${code}`);
+        console.log(`[API] stdout length: ${stdout.length}, stderr length: ${stderr.length}`);
+        
+        if (!supabaseAdmin) {
+          console.error(`[API] Supabase admin client not available, cannot update status for run ${run_id}`);
+          resolve(NextResponse.json(
+            { error: "Supabase admin client not available" },
+            { status: 500 }
+          ));
+          return;
         }
-      } else {
-        // Update status to failed
-        const errorMsg = stderr.length > 0 
-          ? `Process exited with code ${code}. stderr: ${stderr.slice(-500)}`
-          : `Process exited with code ${code}. stdout: ${stdout.slice(-500)}`;
-        const { error } = await supabaseAdmin
+        
+        if (code === 0) {
+          // Update status to completed
+          const completedAt = new Date().toISOString();
+          const { error } = await supabaseAdmin
+            .from("runs")
+            .update({ status: "completed", completed_at: completedAt })
+            .eq("run_id", run_id);
+          if (error) {
+            console.error(`[API] Failed to update status to completed: ${error.message}`);
+            resolve(NextResponse.json(
+              { error: `Failed to update status: ${error.message}` },
+              { status: 500 }
+            ));
+          } else {
+            console.log(`[API] Scraper completed successfully for run ${run_id}`);
+            resolve(NextResponse.json({
+              run_id,
+              status: "completed",
+              message: "Scraper completed successfully",
+              completed_at: completedAt,
+              error_message: null,
+            }));
+          }
+        } else {
+          // Update status to failed
+          const errorMsg = stderr.length > 0 
+            ? `Process exited with code ${code}. stderr: ${stderr.slice(-500)}`
+            : `Process exited with code ${code}. stdout: ${stdout.slice(-500)}`;
+          const { error } = await supabaseAdmin
+            .from("runs")
+            .update({
+              status: "failed",
+              error_message: errorMsg,
+            })
+            .eq("run_id", run_id);
+          if (error) {
+            console.error(`[API] Failed to update status to failed: ${error.message}`);
+          } else {
+            console.error(`[API] Scraper failed for run ${run_id} with code ${code}`);
+          }
+          resolve(NextResponse.json({
+            run_id,
+            status: "failed",
+            message: "Scraper failed",
+            completed_at: null,
+            error_message: errorMsg,
+          }));
+        }
+      });
+
+      child.on("error", async (error) => {
+        clearTimeout(processTimeout);
+        console.error(`[API] Process spawn error for run ${run_id}:`, error);
+        if (!supabaseAdmin) {
+          console.error(`[API] Supabase admin client not available, cannot update status for run ${run_id}`);
+          resolve(NextResponse.json(
+            { error: "Supabase admin client not available" },
+            { status: 500 }
+          ));
+          return;
+        }
+        const { error: updateError } = await supabaseAdmin
           .from("runs")
           .update({
             status: "failed",
-            error_message: errorMsg,
+            error_message: `Failed to spawn process: ${error.message}`,
           })
           .eq("run_id", run_id);
-        if (error) {
-          console.error(`[API] Failed to update status to failed: ${error.message}`);
-        } else {
-          console.error(`[API] Scraper failed for run ${run_id} with code ${code}`);
+        if (updateError) {
+          console.error(`[API] Failed to update status after spawn error: ${updateError.message}`);
         }
-      }
-    });
-
-    child.on("error", async (error) => {
-      console.error(`[API] Process spawn error for run ${run_id}:`, error);
-      if (!supabaseAdmin) {
-        console.error(`[API] Supabase admin client not available, cannot update status for run ${run_id}`);
-        return;
-      }
-      const { error: updateError } = await supabaseAdmin
-        .from("runs")
-        .update({
+        resolve(NextResponse.json({
+          run_id,
           status: "failed",
+          message: "Failed to spawn scraper process",
+          completed_at: null,
           error_message: `Failed to spawn process: ${error.message}`,
-        })
-        .eq("run_id", run_id);
-      if (updateError) {
-        console.error(`[API] Failed to update status after spawn error: ${updateError.message}`);
-      }
-    });
-
-    // Return immediately with run_id
-    return NextResponse.json({
-      run_id,
-      status: "pending",
-      message: "Scraper started",
+        }));
+      });
     });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);

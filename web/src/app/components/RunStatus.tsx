@@ -30,17 +30,9 @@ export default function RunStatus({ runId }: { runId: string }) {
       }
     };
 
+    // Fetch status once (no polling since status comes from API response)
     fetchStatus();
-
-    // Poll every 3 seconds if status is pending or running
-    const interval = setInterval(() => {
-      if (status?.status === "pending" || status?.status === "running") {
-        fetchStatus();
-      }
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [runId, status?.status]);
+  }, [runId]);
 
   if (loading || !status) {
     return null;

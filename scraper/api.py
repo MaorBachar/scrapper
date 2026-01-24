@@ -44,6 +44,8 @@ class ScrapeResponse(BaseModel):
     run_id: str
     status: str
     message: str
+    completed_at: Optional[str] = None
+    error_message: Optional[str] = None
 
 
 @app.get("/")
@@ -119,51 +121,47 @@ async def scrape(request: ScrapeRequest):
     output_root = Path("/tmp/data/runs") if os.path.exists("/tmp") else Path("data/runs")
     output_root.mkdir(parents=True, exist_ok=True)
     
-    # Start the scraper in a background task
-    # In Vercel serverless, we need to ensure the task actually starts executing
-    # The issue: serverless functions terminate when HTTP response is sent
-    # Solution: Run the scraper in executor and ensure it starts before returning
-    print(f"[API] Starting scrape task for run_id: {run_id}, zip_codes: {request.zip_codes}")
+    # Run the scraper synchronously - wait for completion
+    print(f"[API] Starting scrape for run_id: {run_id}, zip_codes: {request.zip_codes}")
     
-    # Use run_in_executor to run in background thread
-    # This ensures the task starts executing before we return
-    loop = asyncio.get_event_loop()
-    future = loop.run_in_executor(
-        None,
-        _run_scrape_task,
-        request.zip_codes,
-        run_id,
-        request.max_listings_per_zip,
-        output_root,
-    )
-    
-    # Don't await the future - let it run in background
-    # But ensure it's scheduled by checking if it's running
-    # Give it a moment to actually start executing
-    await asyncio.sleep(0.5)  # Increased delay to ensure task starts
-    
-    # Check if task has started (not completed, just started)
-    if future.done():
-        # Task completed or failed immediately - handle it
-        try:
-            result = future.result()
-            print(f"[API] Scrape completed immediately: {result}")
-        except Exception as e:
-            print(f"[API] Scrape failed immediately: {e}")
-            import traceback
-            traceback.print_exc()
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to start scraper: {str(e)}",
-            )
-    else:
-        print(f"[API] Scrape task is running in background for run_id: {run_id}")
-    
-    return ScrapeResponse(
-        run_id=run_id,
-        status="pending",
-        message="Scraper started successfully",
-    )
+    try:
+        # Run scrape in executor (non-blocking for async context, but we await it)
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            _run_scrape_task,
+            request.zip_codes,
+            run_id,
+            request.max_listings_per_zip,
+            output_root,
+        )
+        
+        # Scrape completed successfully
+        from datetime import datetime
+        completed_at = datetime.now().isoformat()
+        print(f"[API] Scrape completed successfully for run_id: {run_id}")
+        
+        return ScrapeResponse(
+            run_id=run_id,
+            status="completed",
+            message="Scraper completed successfully",
+            completed_at=completed_at,
+            error_message=None,
+        )
+    except Exception as e:
+        # Scrape failed
+        error_message = str(e)
+        print(f"[API] Scrape failed for run_id {run_id}: {error_message}")
+        import traceback
+        traceback.print_exc()
+        
+        return ScrapeResponse(
+            run_id=run_id,
+            status="failed",
+            message=f"Scraper failed: {error_message}",
+            completed_at=None,
+            error_message=error_message,
+        )
 
 
 # For Vercel serverless functions
