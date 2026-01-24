@@ -22,28 +22,55 @@ export async function POST(request: Request) {
       );
     }
 
-    // Generate run_id (format: YYYYMMDD_HHMMSS to match Python format)
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
-    const hours = String(now.getHours()).padStart(2, "0");
-    const minutes = String(now.getMinutes()).padStart(2, "0");
-    const seconds = String(now.getSeconds()).padStart(2, "0");
-    const run_id = `${year}${month}${day}_${hours}${minutes}${seconds}`;
+    // Generate run_id (format: YYYYMMDD_HHMMSS_mmm to ensure uniqueness)
+    // Include milliseconds to avoid collisions when multiple requests come in the same second
+    let run_id: string;
+    let runData: any;
+    let runError: any;
+    let attempts = 0;
+    const maxAttempts = 5;
 
-    // Create run record in Supabase
-    const { data: runData, error: runError } = await supabaseAdmin
-      .from("runs")
-      .insert({
-        run_id,
-        zip_codes,
-        status: "pending",
-        max_listings_per_zip: max_listings_per_zip || null,
-        created_at: now.toISOString(),
-      })
-      .select()
-      .single();
+    // Retry logic to handle duplicate key errors
+    while (attempts < maxAttempts) {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, "0");
+      const day = String(now.getDate()).padStart(2, "0");
+      const hours = String(now.getHours()).padStart(2, "0");
+      const minutes = String(now.getMinutes()).padStart(2, "0");
+      const seconds = String(now.getSeconds()).padStart(2, "0");
+      const milliseconds = String(now.getMilliseconds()).padStart(3, "0");
+      
+      // Add random component if retrying to ensure uniqueness
+      const randomSuffix = attempts > 0 ? `_${Math.floor(Math.random() * 1000).toString().padStart(3, "0")}` : "";
+      run_id = `${year}${month}${day}_${hours}${minutes}${seconds}_${milliseconds}${randomSuffix}`;
+
+      // Create run record in Supabase
+      const result = await supabaseAdmin
+        .from("runs")
+        .insert({
+          run_id,
+          zip_codes,
+          status: "pending",
+          max_listings_per_zip: max_listings_per_zip || null,
+          created_at: now.toISOString(),
+        })
+        .select()
+        .single();
+
+      runData = result.data;
+      runError = result.error;
+
+      // If no error or error is not a duplicate key, break
+      if (!runError || !runError.message?.includes("duplicate key")) {
+        break;
+      }
+
+      // If duplicate key error, wait a bit and retry
+      attempts++;
+      console.warn(`[API] Duplicate run_id detected (${run_id}), retrying (attempt ${attempts}/${maxAttempts})...`);
+      await new Promise(resolve => setTimeout(resolve, 100 * attempts)); // Exponential backoff
+    }
 
     if (runError) {
       console.error("Failed to create run:", runError);
