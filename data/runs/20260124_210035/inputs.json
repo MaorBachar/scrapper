@@ -1,0 +1,8 @@
+{
+  "zip_codes": [
+    "44125"
+  ],
+  "created_at": "2026-01-24 21:00:35.602829+00:00",
+  "headless": true,
+  "max_listings_per_zip": 5
+}
