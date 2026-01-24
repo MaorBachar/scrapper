@@ -53,7 +53,81 @@ export async function POST(request: Request) {
       );
     }
 
-    // Spawn Python scraper process
+    // Check if Python backend URL is configured (for production)
+    // Default: use local Python process if PYTHON_BACKEND_URL is not set
+    const pythonBackendUrl = process.env.PYTHON_BACKEND_URL;
+    
+    if (pythonBackendUrl) {
+      // Call Python backend via HTTP (production mode)
+      // If URL already includes path, use it as-is; otherwise append /api/scrape
+      const backendEndpoint = pythonBackendUrl.includes('/api/') 
+        ? pythonBackendUrl 
+        : `${pythonBackendUrl}/api/scrape`;
+      
+      console.log(`[API] Calling Python backend at: ${backendEndpoint}`);
+      
+      try {
+        const backendResponse = await fetch(backendEndpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            zip_codes,
+            max_listings_per_zip,
+            run_id,
+          }),
+        });
+
+        if (!backendResponse.ok) {
+          let errorMessage = `Backend returned ${backendResponse.status}`;
+          
+          if (backendResponse.status === 405) {
+            const allowedMethods = backendResponse.headers.get('Allow');
+            errorMessage = `Method Not Allowed. ${allowedMethods ? `Allowed methods: ${allowedMethods}` : 'The endpoint may not accept POST requests.'}`;
+          } else {
+            const errorData = await backendResponse.json().catch(() => null);
+            if (errorData?.error) {
+              errorMessage = errorData.error;
+            }
+          }
+          
+          throw new Error(errorMessage);
+        }
+
+        const backendData = await backendResponse.json();
+        console.log(`[API] Python backend response:`, backendData);
+        
+        // Return immediately - backend will update status in Supabase
+        return NextResponse.json({
+          run_id,
+          status: "pending",
+          message: "Scraper started via backend",
+        });
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`[API] Failed to call Python backend:`, errorMessage);
+        
+        // Update status to failed
+        if (supabaseAdmin) {
+          await supabaseAdmin
+            .from("runs")
+            .update({
+              status: "failed",
+              error_message: `Failed to call Python backend: ${errorMessage}`,
+            })
+            .eq("run_id", run_id);
+        }
+        
+        return NextResponse.json(
+          { error: `Failed to start scraper: ${errorMessage}` },
+          { status: 500 }
+        );
+      }
+    }
+
+    // Default: Spawn Python scraper process locally (when PYTHON_BACKEND_URL is not set)
+    console.log(`[API] Using local Python process (PYTHON_BACKEND_URL not set)`);
     const scraperPath = path.resolve(process.cwd(), "..", "scraper");
     // Use python3 command - ensure PATH includes pyenv shims
     const pythonCmd = process.env.PYTHON_CMD || "python3";
