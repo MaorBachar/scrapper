@@ -102,6 +102,10 @@ export async function POST(request: Request) {
       console.log(`[API] Calling Python backend at: ${backendEndpoint}`);
       
       try {
+        // Add timeout to prevent hanging requests (30 seconds)
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        
         const backendResponse = await fetch(backendEndpoint, {
           method: "POST",
           headers: {
@@ -112,18 +116,30 @@ export async function POST(request: Request) {
             max_listings_per_zip,
             run_id,
           }),
+          signal: controller.signal,
         });
+        
+        clearTimeout(timeoutId);
 
         if (!backendResponse.ok) {
-          let errorMessage = `Backend returned ${backendResponse.status}`;
+          let errorMessage: string;
           
           if (backendResponse.status === 405) {
             const allowedMethods = backendResponse.headers.get('Allow');
             errorMessage = `Method Not Allowed. ${allowedMethods ? `Allowed methods: ${allowedMethods}` : 'The endpoint may not accept POST requests.'}`;
+          } else if (backendResponse.status === 508) {
+            errorMessage = "Backend timeout or resource limit reached. The Python backend may be overloaded or the request is taking too long.";
           } else {
+            // Try to get error message from response body
             const errorData = await backendResponse.json().catch(() => null);
             if (errorData?.error) {
-              errorMessage = errorData.error;
+              // Extract the actual error message, avoiding nested "Failed to start scraper" messages
+              const rawError = errorData.error;
+              errorMessage = rawError.includes("Failed to start scraper:") 
+                ? rawError.replace(/^Failed to start scraper: /, "")
+                : rawError;
+            } else {
+              errorMessage = `Backend returned ${backendResponse.status}`;
             }
           }
           
@@ -140,7 +156,18 @@ export async function POST(request: Request) {
           message: "Scraper started via backend",
         });
       } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        let errorMessage = error instanceof Error ? error.message : String(error);
+        
+        // Handle abort/timeout errors
+        if (error instanceof Error && error.name === 'AbortError') {
+          errorMessage = "Request timeout: Backend did not respond within 30 seconds";
+        }
+        
+        // Avoid nested "Failed to start scraper" messages
+        if (errorMessage.includes("Failed to start scraper:")) {
+          errorMessage = errorMessage.replace(/^Failed to start scraper: /, "");
+        }
+        
         console.error(`[API] Failed to call Python backend:`, errorMessage);
         
         // Update status to failed
@@ -149,13 +176,13 @@ export async function POST(request: Request) {
             .from("runs")
             .update({
               status: "failed",
-              error_message: `Failed to call Python backend: ${errorMessage}`,
+              error_message: `Python backend error: ${errorMessage}`,
             })
             .eq("run_id", run_id);
         }
         
         return NextResponse.json(
-          { error: `Failed to start scraper: ${errorMessage}` },
+          { error: errorMessage },
           { status: 500 }
         );
       }
