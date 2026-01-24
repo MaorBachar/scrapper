@@ -160,6 +160,11 @@ export async function POST(request: Request) {
       console.log(`[API] Process closed for run ${run_id} with exit code ${code}`);
       console.log(`[API] stdout length: ${stdout.length}, stderr length: ${stderr.length}`);
       
+      if (!supabaseAdmin) {
+        console.error(`[API] Supabase admin client not available, cannot update status for run ${run_id}`);
+        return;
+      }
+      
       if (code === 0) {
         // Update status to completed
         const { error } = await supabaseAdmin
@@ -193,6 +198,10 @@ export async function POST(request: Request) {
 
     child.on("error", async (error) => {
       console.error(`[API] Process spawn error for run ${run_id}:`, error);
+      if (!supabaseAdmin) {
+        console.error(`[API] Supabase admin client not available, cannot update status for run ${run_id}`);
+        return;
+      }
       const { updateError } = await supabaseAdmin
         .from("runs")
         .update({
