@@ -202,7 +202,7 @@ export async function POST(request: Request) {
         console.error(`[API] Supabase admin client not available, cannot update status for run ${run_id}`);
         return;
       }
-      const { updateError } = await supabaseAdmin
+      const { error: updateError } = await supabaseAdmin
         .from("runs")
         .update({
           status: "failed",
