@@ -60,7 +60,8 @@ def _run_scrape_task(
 ):
     """Background task to run the scraper."""
     try:
-        run_scrape(
+        print(f"[API] Starting scrape task for run_id: {run_id}, zip_codes: {zip_codes}")
+        result = run_scrape(
             zip_codes=zip_codes,
             output_root=output_root,
             headless=True,  # Always headless in serverless
@@ -73,10 +74,21 @@ def _run_scrape_task(
             proxy=None,
             cdp_url=None,
         )
+        print(f"[API] Scrape task completed for run_id: {run_id}")
+        return result
     except Exception as e:
-        print(f"[ERROR] Scrape task failed: {e}")
+        print(f"[ERROR] Scrape task failed for run_id {run_id}: {e}")
         import traceback
         traceback.print_exc()
+        # Try to update status to failed in Supabase
+        try:
+            from zillow_scrapper.supabase_client import get_supabase_client, update_run_status
+            supabase_client = get_supabase_client()
+            if supabase_client and run_id:
+                update_run_status(supabase_client, run_id, "failed", str(e))
+        except Exception as update_error:
+            print(f"[ERROR] Failed to update status: {update_error}")
+        raise
 
 
 @app.post("/api/scrape", response_model=ScrapeResponse)
@@ -108,16 +120,47 @@ async def scrape(request: ScrapeRequest):
     output_root.mkdir(parents=True, exist_ok=True)
     
     # Start the scraper in a background task
-    # Return immediately - the scrape will continue running
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(
-        None,
-        _run_scrape_task,
-        request.zip_codes,
-        run_id,
-        request.max_listings_per_zip,
-        output_root,
-    )
+    # In Vercel serverless, we need to ensure the task actually starts executing
+    # before the function returns. Using create_task ensures it's scheduled.
+    print(f"[API] Scheduling scrape task for run_id: {run_id}, zip_codes: {request.zip_codes}")
+    
+    async def run_scrape_async():
+        """Async wrapper to run the scrape task."""
+        loop = asyncio.get_event_loop()
+        try:
+            result = await loop.run_in_executor(
+                None,
+                _run_scrape_task,
+                request.zip_codes,
+                run_id,
+                request.max_listings_per_zip,
+                output_root,
+            )
+            return result
+        except Exception as e:
+            print(f"[API] Error in scrape task: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+    
+    # Create the task - this schedules it for execution
+    task = asyncio.create_task(run_scrape_async())
+    
+    # Give it a tiny moment to actually start (ensures task begins before function returns)
+    # This is important in serverless environments where the function might terminate
+    await asyncio.sleep(0.1)
+    
+    # Check if task started (not completed, just started)
+    if task.done():
+        # Task completed or failed immediately
+        try:
+            await task
+        except Exception as e:
+            print(f"[API] Task failed immediately: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to start scraper: {str(e)}",
+            )
     
     return ScrapeResponse(
         run_id=run_id,
