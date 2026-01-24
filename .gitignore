@@ -1,0 +1,19 @@
+scraper/data/
+scraper/.venv/
+scraper/dist/
+scraper/.pytest_cache/
+scraper/**/__pycache__/
+scraper/**/*.pyc
+
+web/node_modules/
+web/.next/
+web/out/
+
+# General patterns
+node_modules/
+venv/
+.venv/
+env/
+.env/
+
+.DS_Store
