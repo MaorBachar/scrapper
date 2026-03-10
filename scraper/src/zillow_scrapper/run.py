@@ -17,6 +17,8 @@ from zillow_scrapper.supabase_client import (
     create_run,
     get_supabase_client,
     get_run_uuid,
+    get_run_llc_id,
+    save_listing,
     save_matched_result,
     update_run_status,
 )
@@ -49,6 +51,7 @@ def run_scrape(
     max_listings_per_zip: Optional[int] = None,
     proxy: Optional[dict[str, str]] = None,
     cdp_url: Optional[str] = None,
+    mode: str = "full",
 ) -> RunResult:
     """
     Run the scraping process using HomeHarvest.
@@ -106,10 +109,13 @@ def run_scrape(
     
     supabase_client = get_supabase_client()
     run_uuid = None
+    run_llc_id = None
     if supabase_client:
         run_uuid = create_run(supabase_client, run_id, zip_codes, max_listings_per_zip)
         if run_uuid:
             console.print(f"[cyan]Created Supabase run record: {run_uuid}[/cyan]")
+            run_llc_id = get_run_llc_id(supabase_client, run_uuid)
+            console.print(f"[cyan]Run LLC ID: {run_llc_id}[/cyan]")
             update_run_status(supabase_client, run_id, "running")
         else:
             console.print("[yellow]Warning: Failed to create Supabase run record, continuing without Supabase[/yellow]")
@@ -144,7 +150,12 @@ def run_scrape(
             _write_json(for_sale_raw_path, {"run_id": run_id, "by_zip": for_sale_by_zip})
 
             listings_count = len(zip_result.get("listings", []))
-            console.print(f"[green]Found {listings_count} listings for ZIP {zip_code}[/green]")
+            zip_error = zip_result.get("error")
+            if zip_error:
+                console.print(f"[red]Error scraping ZIP {zip_code}: {zip_error}[/red]")
+                if supabase_client:
+                    update_run_status(supabase_client, run_id, "running", zip_error)
+            console.print(f"[{'green' if listings_count > 0 else 'yellow'}]Found {listings_count} listings for ZIP {zip_code}[/]")
             for listing_dict in zip_result.get("listings", []):
                 listing = Listing.model_validate(listing_dict)
                 key = listing.zpid or listing.url
@@ -153,6 +164,18 @@ def run_scrape(
             _write_json(run_state_path, state.to_dict())
             # Already written incrementally above, but ensure final state.
             _write_json(for_sale_raw_path, {"run_id": run_id, "by_zip": for_sale_by_zip})
+
+        # In listings_first mode: save every listing to Supabase now and
+        # signal that listings are ready before starting the comps phase.
+        if mode == "listings_first" and supabase_client and run_uuid:
+            console.print(f"[cyan]Saving {len(all_listings)} listings to Supabase...[/cyan]")
+            for listing in all_listings.values():
+                try:
+                    save_listing(supabase_client, run_uuid, listing, llc_id=run_llc_id)
+                except Exception as e:
+                    console.print(f"[red]Error saving listing: {e}[/red]")
+            update_run_status(supabase_client, run_id, "listings_completed")
+            console.print("[green]✓ Listings phase complete — starting comps in background[/green]")
 
         sold_by_listing: list[dict[str, Any]] = []
         matched_results: list[dict[str, Any]] = []
@@ -238,7 +261,7 @@ def run_scrape(
                             # Save to Supabase if available
                             if supabase_client and run_uuid:
                                 try:
-                                    save_matched_result(supabase_client, run_uuid, mr)
+                                    save_matched_result(supabase_client, run_uuid, mr, llc_id=run_llc_id)
                                     console.print(f"[dim]  → Saved to Supabase[/dim]")
                                 except Exception as e:
                                     console.print(f"[red]Error: Failed to save to Supabase: {e}[/red]")

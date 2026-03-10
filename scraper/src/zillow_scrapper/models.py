@@ -27,6 +27,9 @@ class Listing(BaseModel):
     architectural_style: Optional[str] = None
     days_on_zillow: Optional[int] = None
 
+    agent_name: Optional[str] = None
+    agent_phone: Optional[str] = None
+
 
 class SoldComp(BaseModel):
     zpid: Optional[str] = None

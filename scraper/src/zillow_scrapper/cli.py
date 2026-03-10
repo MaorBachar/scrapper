@@ -63,6 +63,10 @@ def run(
             "Launch Chrome with: google-chrome --remote-debugging-port=9222 --user-data-dir=/path/to/profile"
         ),
     ),
+    mode: str = typer.Option(
+        "full",
+        help="Scrape mode: full (listings+comps together) or listings_first (listings saved first, comps in background).",
+    ),
 ):
     zip_list = [z.strip() for z in zips.split(",") if z.strip()]
     if not zip_list:
@@ -102,6 +106,7 @@ def run(
         max_listings_per_zip=max_listings_per_zip,
         proxy=proxy_config,
         cdp_url=cdp_url,
+        mode=mode,
     )
     console.print(f"[green]Run complete[/green]: {run_result.run_id}")
     console.print(json.dumps(run_result.model_dump(), indent=2, default=str))

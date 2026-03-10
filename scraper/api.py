@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -16,13 +17,52 @@ src_dir = current_dir / "src"
 if src_dir.exists() and str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from zillow_scrapper.run import run_scrape
 
-app = FastAPI(title="Zillow Scraper API")
+CRON_SECRET = os.getenv("CRON_SECRET", "")
+PRICE_CHECK_INTERVAL_HOURS = int(os.getenv("PRICE_CHECK_INTERVAL_HOURS", "2"))
+
+
+async def _price_check_loop():
+    """Background loop that runs the full cron cycle on a fixed interval."""
+    interval_seconds = PRICE_CHECK_INTERVAL_HOURS * 3600
+    await asyncio.sleep(60)
+    while True:
+        try:
+            print(f"[SCHEDULER] Starting cron cycle (price check + favorites + comps backfill)...")
+            loop = asyncio.get_event_loop()
+            from zillow_scrapper.supabase_client import get_supabase_client
+            from zillow_scrapper.price_check import run_cron_cycle
+
+            client = get_supabase_client()
+            if client:
+                summary = await loop.run_in_executor(None, run_cron_cycle, client)
+                print(f"[SCHEDULER] Cron cycle completed: {summary}")
+            else:
+                print("[SCHEDULER] Supabase client not available, skipping.")
+        except Exception as e:
+            print(f"[SCHEDULER] Cron cycle failed: {e}")
+            import traceback
+            traceback.print_exc()
+        await asyncio.sleep(interval_seconds)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(_price_check_loop())
+    yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+app = FastAPI(title="Zillow Scraper API", lifespan=lifespan)
 
 # Enable CORS for Next.js frontend
 app.add_middleware(
@@ -38,6 +78,7 @@ class ScrapeRequest(BaseModel):
     zip_codes: list[str]
     max_listings_per_zip: Optional[int] = None
     run_id: Optional[str] = None
+    mode: Optional[str] = "full"
 
 
 class ScrapeResponse(BaseModel):
@@ -59,10 +100,11 @@ def _run_scrape_task(
     run_id: Optional[str],
     max_listings_per_zip: Optional[int],
     output_root: Path,
+    mode: str = "full",
 ):
     """Background task to run the scraper."""
     try:
-        print(f"[API] Starting scrape task for run_id: {run_id}, zip_codes: {zip_codes}")
+        print(f"[API] Starting scrape task for run_id: {run_id}, zip_codes: {zip_codes}, mode: {mode}")
         result = run_scrape(
             zip_codes=zip_codes,
             output_root=output_root,
@@ -75,6 +117,7 @@ def _run_scrape_task(
             max_listings_per_zip=max_listings_per_zip,
             proxy=None,
             cdp_url=None,
+            mode=mode,
         )
         print(f"[API] Scrape task completed for run_id: {run_id}")
         return result
@@ -134,6 +177,7 @@ async def scrape(request: ScrapeRequest):
             run_id,
             request.max_listings_per_zip,
             output_root,
+            request.mode or "full",
         )
         
         # Scrape completed successfully
@@ -162,6 +206,29 @@ async def scrape(request: ScrapeRequest):
             completed_at=None,
             error_message=error_message,
         )
+
+
+@app.post("/api/cron/price-check")
+async def cron_price_check(authorization: str = Header(default="")):
+    """
+    Cron endpoint: run full cron cycle (price check + favorites + comps backfill).
+    Secured with Bearer token from CRON_SECRET env var.
+    """
+    if CRON_SECRET:
+        token = authorization.replace("Bearer ", "").strip()
+        if token != CRON_SECRET:
+            raise HTTPException(status_code=401, detail="Invalid or missing CRON_SECRET")
+
+    from zillow_scrapper.supabase_client import get_supabase_client
+    from zillow_scrapper.price_check import run_cron_cycle
+
+    client = get_supabase_client()
+    if not client:
+        raise HTTPException(status_code=500, detail="Supabase client not available")
+
+    loop = asyncio.get_event_loop()
+    summary = await loop.run_in_executor(None, run_cron_cycle, client)
+    return {"status": "ok", "summary": summary}
 
 
 # For Vercel serverless functions

@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { getSessionUser, unauthorizedResponse } from "@/lib/auth";
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ runId: string }> }
 ) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) return unauthorizedResponse();
+
   try {
     const { runId } = await params;
 

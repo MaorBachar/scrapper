@@ -17,3 +17,7 @@ env/
 .env/
 
 .DS_Store
+.idea/
+.cursor/
+*.env
+.env.*

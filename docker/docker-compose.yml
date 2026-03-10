@@ -1,0 +1,18 @@
+# Local Docker Registry - maor
+# Run: docker compose -f docker/docker-compose.yml up -d
+# Push: docker tag myimage localhost:5000/myimage && docker push localhost:5000/myimage
+
+services:
+  registry:
+    image: registry:2
+    container_name: docker-maor-registry
+    ports:
+      - "5000:5000"
+    volumes:
+      - registry-data:/var/lib/registry
+    restart: unless-stopped
+    environment:
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+
+volumes:
+  registry-data:

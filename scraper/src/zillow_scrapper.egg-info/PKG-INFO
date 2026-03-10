@@ -13,6 +13,9 @@ Requires-Dist: certifi>=2024.0.0
 Requires-Dist: requests>=2.31.0
 Requires-Dist: urllib3>=2.0.0
 Requires-Dist: supabase>=2.0.0
+Requires-Dist: fastapi>=0.115.0
+Requires-Dist: mangum>=0.18.0
+Requires-Dist: uvicorn>=0.32.0
 
 ## Scraper
 

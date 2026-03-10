@@ -118,7 +118,10 @@ def scrape_for_sale_zip(
             # Convert to our Listing model
             for prop in raw_data:
                 try:
-                    # Extract URL
+                    status = str(prop.get("status") or "").upper().replace(" ", "_")
+                    if status and status != "FOR_SALE":
+                        continue
+
                     url = prop.get("property_url") or prop.get("url") or ""
                     if not url:
                         continue
@@ -215,6 +218,17 @@ def scrape_for_sale_zip(
                     
                     days_on_zillow = coerce_int(prop.get("days_on_mls") or prop.get("days_on_market") or prop.get("days_on_zillow"))
                     
+                    agent_name = prop.get("agent_name") or None
+                    agent_phone = None
+                    raw_phones = prop.get("agent_phones")
+                    if raw_phones and isinstance(raw_phones, list):
+                        primary = next((p for p in raw_phones if isinstance(p, dict) and p.get("primary")), None)
+                        chosen = primary or (raw_phones[0] if raw_phones else None)
+                        if chosen and isinstance(chosen, dict):
+                            agent_phone = chosen.get("number") or None
+                    elif raw_phones and isinstance(raw_phones, str):
+                        agent_phone = raw_phones
+
                     listing = Listing(
                         zpid=zpid,
                         url=url,
@@ -231,6 +245,8 @@ def scrape_for_sale_zip(
                         home_type=home_type,
                         architectural_style=architectural_style,
                         days_on_zillow=days_on_zillow,
+                        agent_name=agent_name,
+                        agent_phone=agent_phone,
                     )
                     
                     key = listing.zpid or listing.url

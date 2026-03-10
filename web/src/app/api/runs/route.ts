@@ -1,31 +1,30 @@
 import { NextResponse } from "next/server";
-import fs from "node:fs/promises";
-import path from "node:path";
-
-function runsRoot(): string {
-  // repoRoot/web -> repoRoot/scraper/data/runs
-  return path.resolve(process.cwd(), "..", "scraper", "data", "runs");
-}
-
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
+import { supabaseAdmin } from "@/lib/supabase";
+import { getSessionUser, unauthorizedResponse } from "@/lib/auth";
 
 export async function GET() {
-  const root = runsRoot();
-  try {
-    const entries = await fs.readdir(root, { withFileTypes: true });
-    const runIds = entries
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name)
-      .sort()
-      .reverse();
-    return NextResponse.json({ runIds });
-  } catch (e: unknown) {
-    return NextResponse.json(
-      { runIds: [], error: `Failed to read runs directory: ${errMsg(e)}` },
-      { status: 500 },
-    );
-  }
-}
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) return unauthorizedResponse();
 
+  if (!supabaseAdmin) {
+    return NextResponse.json({ error: "Supabase not configured" }, { status: 500 });
+  }
+
+  let query = supabaseAdmin
+    .from("runs")
+    .select("id, run_id, zip_codes, status, max_listings_per_zip, created_at, completed_at, error_message, llc_id")
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  if (!sessionUser.isSuperAdmin && sessionUser.llcId) {
+    query = query.eq("llc_id", sessionUser.llcId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  const runIds = (data ?? []).map((r) => r.run_id);
+  return NextResponse.json({ runIds, runs: data ?? [] });
+}

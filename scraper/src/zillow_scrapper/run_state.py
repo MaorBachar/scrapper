@@ -46,10 +46,22 @@ class RunState:
         }
 
 
+def _sanitize_floats(obj: Any) -> Any:
+    """Replace inf/nan floats with None so json.dumps doesn't raise."""
+    import math
+    if isinstance(obj, float):
+        return None if math.isinf(obj) or math.isnan(obj) else obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_floats(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_floats(v) for v in obj]
+    return obj
+
+
 def atomic_write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    tmp.write_text(json.dumps(_sanitize_floats(payload), indent=2, default=str), encoding="utf-8")
     tmp.replace(path)
 
 

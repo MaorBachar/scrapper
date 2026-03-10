@@ -7,7 +7,26 @@ type Run = {
   run_id: string;
   status: string;
   zip_codes: string[];
+  created_at: string;
 };
+
+function formatRunLabel(run: Run): string {
+  const zips = Array.isArray(run.zip_codes)
+    ? run.zip_codes.join(", ")
+    : String(run.zip_codes ?? "");
+  try {
+    const d = new Date(run.created_at);
+    if (isNaN(d.getTime())) throw new Error("bad date");
+    const mo = d.getUTCMonth() + 1;
+    const day = d.getUTCDate();
+    const yr = d.getUTCFullYear();
+    const h = String(d.getUTCHours()).padStart(2, "0");
+    const m = String(d.getUTCMinutes()).padStart(2, "0");
+    return `${mo}/${day}/${yr} ${h}:${m} UTC  —  ${zips}  (${run.status})`;
+  } catch {
+    return `${run.run_id}  —  ${zips}  (${run.status})`;
+  }
+}
 
 export default function PropertySearchForm({
   runs,
@@ -15,12 +34,14 @@ export default function PropertySearchForm({
   defaultRunId,
   defaultPropertyType,
   defaultSqftPercentage,
+  defaultMaxDays,
 }: {
   runs: Run[];
   propertyTypes: string[];
   defaultRunId?: string;
   defaultPropertyType?: string;
   defaultSqftPercentage?: string;
+  defaultMaxDays?: string;
 }) {
   const router = useRouter();
   const [selectedRunId, setSelectedRunId] = useState(defaultRunId || "");
@@ -30,149 +51,126 @@ export default function PropertySearchForm({
   const [sqftPercentage, setSqftPercentage] = useState(
     defaultSqftPercentage || "20"
   );
-  const [isSearching, setIsSearching] = useState(false);
+  const [maxDays, setMaxDays] = useState(defaultMaxDays || "");
+  const [searching, setSearching] = useState(false);
+
+  const completedRuns = runs.filter((r) => r.status === "completed");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedRunId || !selectedPropertyType) {
-      return;
-    }
-
-    setIsSearching(true);
+    if (!selectedRunId || !selectedPropertyType) return;
+    setSearching(true);
     const params = new URLSearchParams();
     params.set("runId", selectedRunId);
     params.set("propertyType", selectedPropertyType);
     if (sqftPercentage && sqftPercentage !== "20") {
       params.set("sqftPercentage", sqftPercentage);
     }
+    if (maxDays) {
+      params.set("maxDays", maxDays);
+    }
     router.push(`?${params.toString()}`);
-    // Note: setIsSearching(false) will be handled by page re-render
   };
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      style={{
-        padding: 24,
-        border: "1px solid #eee",
-        borderRadius: 12,
-        backgroundColor: "#fafafa",
-        maxWidth: 600,
-        margin: "0 auto",
-      }}
-    >
-      <h2 style={{ marginTop: 0, marginBottom: 16 }}>Search Properties</h2>
-      <p style={{ color: "#666", marginBottom: 24 }}>
-        Select a run and property type to view filtered listings and comps.
-      </p>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <div>
-          <label
-            htmlFor="run-select"
-            style={{ display: "block", marginBottom: 8, fontWeight: 500 }}
-          >
-            Run
-          </label>
-          <select
-            id="run-select"
-            value={selectedRunId}
-            onChange={(e) => setSelectedRunId(e.target.value)}
-            required
-            disabled={isSearching}
-            style={{
-              width: "100%",
-              padding: "8px 12px",
-              border: "1px solid #ccc",
-              borderRadius: 4,
-              fontSize: 14,
-            }}
-          >
-            <option value="">-- Select a run --</option>
-            {runs.map((run) => (
-              <option key={run.run_id} value={run.run_id}>
-                {run.run_id} ({run.status}) - {run.zip_codes.join(", ")}
-              </option>
-            ))}
-          </select>
+    <div className="card">
+      <div className="card-body">
+        <div className="section-title" style={{ marginBottom: 14 }}>
+          View Results
         </div>
 
-        <div>
-          <label
-            htmlFor="property-type-select"
-            style={{ display: "block", marginBottom: 8, fontWeight: 500 }}
-          >
-            Property Type
-          </label>
-          <select
-            id="property-type-select"
-            value={selectedPropertyType}
-            onChange={(e) => setSelectedPropertyType(e.target.value)}
-            required
-            disabled={isSearching}
-            style={{
-              width: "100%",
-              padding: "8px 12px",
-              border: "1px solid #ccc",
-              borderRadius: 4,
-              fontSize: 14,
-            }}
-          >
-            {propertyTypes.map((type) => (
-              <option key={type} value={type}>
-                {type}
-              </option>
-            ))}
-          </select>
-        </div>
+        {completedRuns.length === 0 ? (
+          <p className="text-muted text-sm">
+            No completed runs yet. Start a scrape above.
+          </p>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            <div className="form-row">
+              <div className="form-group" style={{ flex: "1 1 280px" }}>
+                <label htmlFor="run-select">Run</label>
+                <select
+                  id="run-select"
+                  className="form-input"
+                  value={selectedRunId}
+                  onChange={(e) => setSelectedRunId(e.target.value)}
+                  required
+                  disabled={searching}
+                >
+                  <option value="">Select a run...</option>
+                  {completedRuns.map((run) => (
+                    <option key={run.run_id} value={run.run_id}>
+                      {formatRunLabel(run)}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-        <div>
-          <label
-            htmlFor="sqft-percentage-input"
-            style={{ display: "block", marginBottom: 8, fontWeight: 500 }}
-          >
-            Sqft Tolerance (%)
-          </label>
-          <input
-            id="sqft-percentage-input"
-            type="number"
-            min="0"
-            max="100"
-            value={sqftPercentage}
-            onChange={(e) => setSqftPercentage(e.target.value)}
-            required
-            disabled={isSearching}
-            style={{
-              width: "100%",
-              padding: "8px 12px",
-              border: "1px solid #ccc",
-              borderRadius: 4,
-              fontSize: 14,
-            }}
-          />
-          <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
-            Filter comps within ±{sqftPercentage || "20"}% of listing sqft
-          </div>
-        </div>
+              <div className="form-group" style={{ flex: "0 0 170px" }}>
+                <label htmlFor="prop-type">Property Type</label>
+                <select
+                  id="prop-type"
+                  className="form-input"
+                  value={selectedPropertyType}
+                  onChange={(e) => setSelectedPropertyType(e.target.value)}
+                  disabled={searching}
+                >
+                  <option value="All">All</option>
+                  {propertyTypes.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-        <button
-          type="submit"
-          disabled={!selectedRunId || !selectedPropertyType || isSearching}
-          style={{
-            padding: "10px 24px",
-            backgroundColor: isSearching ? "#ccc" : "#0066cc",
-            color: "white",
-            border: "none",
-            borderRadius: 4,
-            fontSize: 16,
-            fontWeight: 500,
-            cursor: isSearching ? "not-allowed" : "pointer",
-            alignSelf: "flex-start",
-          }}
-        >
-          {isSearching ? "Searching..." : "Search"}
-        </button>
+              <div className="form-group" style={{ flex: "0 0 120px" }}>
+                <label htmlFor="sqft-pct">Sqft Tolerance</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span className="text-muted text-sm">&plusmn;</span>
+                  <input
+                    id="sqft-pct"
+                    className="form-input"
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={sqftPercentage}
+                    onChange={(e) => setSqftPercentage(e.target.value)}
+                    disabled={searching}
+                    style={{ flex: 1 }}
+                  />
+                  <span className="text-muted text-sm">%</span>
+                </div>
+              </div>
+
+              <div className="form-group" style={{ flex: "0 0 140px" }}>
+                <label htmlFor="max-days">Listed Within</label>
+                <select
+                  id="max-days"
+                  className="form-input"
+                  value={maxDays}
+                  onChange={(e) => setMaxDays(e.target.value)}
+                  disabled={searching}
+                >
+                  <option value="">Any time</option>
+                  <option value="7">Last 7 days</option>
+                  <option value="14">Last 14 days</option>
+                  <option value="30">Last 30 days</option>
+                  <option value="60">Last 60 days</option>
+                  <option value="90">Last 90 days</option>
+                </select>
+              </div>
+
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={!selectedRunId || searching}
+              >
+                {searching ? "Loading..." : "Search"}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
-    </form>
+    </div>
   );
 }
