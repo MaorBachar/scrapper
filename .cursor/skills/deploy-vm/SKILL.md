@@ -11,8 +11,8 @@ Build locally and deploy the Next.js web app to the Oracle Cloud VM.
 
 Set these environment variables (e.g. in your shell profile or `.env`):
 
-- `DEPLOY_SSH_KEY` — path to your SSH private key file
-- `DEPLOY_HOST` — SSH user and host (e.g. `ubuntu@<ip>`)
+- `ZILLOW_SCRAPPER_SSH_KEY` — path to your SSH private key file
+- `ZILLOW_SCRAPPER_HOST` — SSH user and host (e.g. `ubuntu@<ip>`)
 
 Defaults used below:
 
@@ -43,22 +43,22 @@ tar czf /tmp/web-deploy.tar.gz .next src package.json next.config.ts tsconfig.js
 ### 3. Transfer to VM
 
 ```bash
-scp -i "$DEPLOY_SSH_KEY" \
+scp -i "$ZILLOW_SCRAPPER_SSH_KEY" \
   /tmp/web-deploy.tar.gz \
-  "$DEPLOY_HOST":/tmp/web-deploy.tar.gz
+  "$ZILLOW_SCRAPPER_HOST":/tmp/web-deploy.tar.gz
 ```
 
 ### 4. Extract and restart
 
 ```bash
-ssh -i "$DEPLOY_SSH_KEY" "$DEPLOY_HOST" \
+ssh -i "$ZILLOW_SCRAPPER_SSH_KEY" "$ZILLOW_SCRAPPER_HOST" \
   "cd /home/ubuntu/app && tar xzf /tmp/web-deploy.tar.gz && pm2 restart zillow-web"
 ```
 
 ### 5. Verify
 
 ```bash
-ssh -i "$DEPLOY_SSH_KEY" "$DEPLOY_HOST" \
+ssh -i "$ZILLOW_SCRAPPER_SSH_KEY" "$ZILLOW_SCRAPPER_HOST" \
   "pm2 status zillow-web"
 ```
 
@@ -68,7 +68,7 @@ Confirm the process is `online` and uptime is a few seconds (indicating a fresh 
 
 - If `package.json` dependencies changed, run `npm install` on the VM after extracting:
   ```bash
-  ssh -i "$DEPLOY_SSH_KEY" "$DEPLOY_HOST" \
+  ssh -i "$ZILLOW_SCRAPPER_SSH_KEY" "$ZILLOW_SCRAPPER_HOST" \
     "cd /home/ubuntu/app && npm install --production"
   ```
 - The scraper runs as a separate PM2 process (`zillow-scraper`) and is not affected by web deploys.
