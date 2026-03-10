@@ -4,15 +4,18 @@ import os
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # Add src to path
 current_dir = Path(__file__).parent
 src_dir = current_dir / "src"
 if src_dir.exists() and str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
-# Set Supabase credentials for testing
-os.environ["SUPABASE_URL"] = "https://akxpakrvrhiorlclhdug.supabase.co"
-os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "sb_secret_w41-Wcrx8ocuvJDktVnxQQ_y8ku99mq"
+if not os.getenv("SUPABASE_URL") or not os.getenv("SUPABASE_SERVICE_ROLE_KEY"):
+    sys.exit("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env")
 
 from zillow_scrapper.run import run_scrape
 
